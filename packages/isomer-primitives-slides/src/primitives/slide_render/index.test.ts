@@ -303,7 +303,8 @@ describe('slideRender output', () => {
 describe('slideRender blank lines', () => {
   const code = {
     type: 'slideCode',
-    panels: [{ file: 'a.ts', lines: ['const a = 1;', '', 'const b = 2;'] }],
+    file: 'a.ts',
+    text: 'const a = 1;\n\nconst b = 2;',
   };
   const node = { type: 'slideRender', surface: 'text', body: [code] };
 
@@ -440,8 +441,6 @@ describe('slideRender JSX', () => {
           )
         )
       )
-    ).toThrow(
-      'Expected <SlideRenderGrid.RenderTile> but received <SlideHeading>.'
-    );
+    ).toThrow('Expected <SlideRenderGrid.Tile> but received <SlideHeading>.');
   });
 });
