@@ -129,13 +129,13 @@ A field filled from JSX children is branded on the schema. `fromChildren` and `f
 
 ```ts
 items: fromChildren(
-  'slideTerritory',
+  'territory',
   z.array(territorySchema).min(1).max(4).describe('Owners, left to right, in equal columns. 1 to 4.'),
   { text: 'body' }
 ),
 ```
 
-`slideJsx` then includes `SlideTerritory`, typed from the array element. `text: 'body'` copies leftover text children onto that field. An explicit `items` prop wins over children. Placing `<SlideTerritory>` directly under `<Composition>` throws, because it is not a body node.
+`slideJsx` then includes `Territory`, typed from the array element. `text: 'body'` copies leftover text children onto that field. An explicit `items` prop wins over children. Placing `<Territory>` directly under `<Composition>` throws, because it is not a body node.
 
 A string field uses `fromTextChildren` the same way, with `collapseWhitespace: false` when newlines matter.
 
@@ -148,10 +148,14 @@ Nested nodes arrive as JSX children, never as an element inside a prop object. A
 ```tsx
 <SlideSplitLayout divider="arrow">
   <SplitPane label="Before">
-    <SlideCode panels={[{ lines: ['curl …'] }]} />
+    <SlideCode>
+      <CodePanel>curl …</CodePanel>
+    </SlideCode>
   </SplitPane>
   <SplitPane label="After" tone="primary">
-    <SlideBulletList items={['One call']} />
+    <SlideBulletList>
+      <BulletItem>One call</BulletItem>
+    </SlideBulletList>
   </SplitPane>
 </SlideSplitLayout>
 ```
@@ -244,7 +248,7 @@ const { Composition, SlideFooter, SlideFrame, SlideHeading, toComposition } =
 const composition = toComposition(
   <Composition title="Refunds settle in two days">
     <SlideFrame>
-      <SlideHeading title="Refunds settle in two days, not five" />
+      <SlideHeading>Refunds settle in two days, not five</SlideHeading>
       <SlideFooter brand="Ledger" sectionNumber="02" section="Settlement" />
     </SlideFrame>
   </Composition>
@@ -259,7 +263,9 @@ A whole-slide layout takes its parts as children. `TitleDefinition` fills `defin
     Everything a customer means to buy, carried from whichever store can fill it.
   </TitleDefinition>
   <TitleAside>
-    <SlideBulletList marker="check" items={['Charges the card once.']} />
+    <SlideBulletList marker="check">
+      <BulletItem>Charges the card once.</BulletItem>
+    </SlideBulletList>
   </TitleAside>
 </TitleSlide>
 
@@ -293,13 +299,165 @@ A container that arranges primitives inside a slide ends in `Layout`. `SlideStac
 
 ```tsx
 <SlideStackLayout spacing="tight">
-  <SlideBulletList items={['One nightly run.']} />
-  <SlideCode panels={[{ lines: ['npm run settle -- --nightly'] }]} />
+  <SlideBulletList>
+    <BulletItem>One nightly run.</BulletItem>
+  </SlideBulletList>
+  <SlideCommand>npm run settle -- --nightly</SlideCommand>
 </SlideStackLayout>
 
 <SlideWindowLayout chrome="terminal" title="~/shop — release">
-  <SlideCode panels={[{ lines: ['npm run settle -- --nightly'] }]} />
+  <SlideCommand>npm run settle -- --nightly</SlideCommand>
 </SlideWindowLayout>
+```
+
+A content primitive takes its list as children named for it, without the `Slide` prefix. Each child's sentence is its text, and its short fields are attributes. A heading's title is its text, and `lede` stays an attribute. A list of plain strings takes one child per string:
+
+```tsx
+<SlideHeading lede="Same ledger, fewer days.">Refunds settle in **two days**</SlideHeading>
+
+<SlideBulletList marker="check">
+  <BulletItem>Charges the card once.</BulletItem>
+  <BulletItem>Refunds in `two days`.</BulletItem>
+</SlideBulletList>
+
+<SlideColumns highlight={1}>
+  <Column title="Poll">Lags by one interval.</Column>
+  <Column title="Push" tags={['webhook']}>Immediate.</Column>
+</SlideColumns>
+
+<SlideDefinitions>
+  <Definition term="hold">Money set aside, not yet taken.</Definition>
+</SlideDefinitions>
+
+<SlideList label="Limits">
+  <ListItem term="rate">100 requests a second.</ListItem>
+</SlideList>
+
+<SlideRoadmap>
+  <RoadmapColumn title="Now" status="Shipped" current>
+    <RoadmapItem title="Holds">Set money aside at checkout.</RoadmapItem>
+  </RoadmapColumn>
+  <RoadmapColumn title="Next" status="In design">
+    <RoadmapItem title="Splits">Pay two stores from one order.</RoadmapItem>
+  </RoadmapColumn>
+</SlideRoadmap>
+```
+
+Code keeps its whitespace. A command is its text. A `CodePanel`'s text is its `lines`: write it as a template literal, and the line break after the opening backtick, the indentation before the closing one, and the indentation every line shares are dropped. JSX itself collapses line breaks in bare text, so multi-line source needs the template literal. A `DiffLine` is one line exactly as written; `op` marks it added or removed, and a line that is indented or holds a brace takes its text as a string expression. A transcript takes `TranscriptTurn` children, each turn's text keeping its line breaks:
+
+```tsx
+<SlideCommand label="Install">npm install @elastic/isomer-runtime</SlideCommand>
+
+<SlideCode>
+  <CodePanel file="refund.ts" language="ts" highlightLines={[2]}>
+    {`
+      const refund = async (id) => {
+        await ledger.hold(id);
+        return ledger.settle(id);
+      };
+    `}
+  </CodePanel>
+</SlideCode>
+
+<SlideDiff file="refund.ts" language="ts">
+  <DiffLine>{'export async function refund(id: string) {'}</DiffLine>
+  <DiffLine op="remove">{'  return settle(id);'}</DiffLine>
+  <DiffLine op="add">{'  return ledger.settle(id);'}</DiffLine>
+  <DiffLine>{'}'}</DiffLine>
+</SlideDiff>
+
+<SlideTranscript label="Tool call">
+  <TranscriptTurn role="user">Refund order 1042.</TranscriptTurn>
+  <TranscriptTurn role="model" format="code">{'refund({ order: 1042 })'}</TranscriptTurn>
+</SlideTranscript>
+```
+
+A number's sentence is its text, and the figures are attributes. A bar's label is its text. A table, a matrix, and a quadrant keep their grids as props: a row is a list of cells, and an element per cell would be longer than the array it replaces.
+
+```tsx
+<SlideStat value="2" unit="days">Refunds settle **three days** sooner.</SlideStat>
+
+<SlideDelta before={{ label: 'Before', value: '5 days' }} after={{ label: 'After', value: '2 days' }}>
+  The ledger writes first.
+</SlideDelta>
+
+<SlideStats>
+  <Stat value="41" label="Minutes">Checkout was down.</Stat>
+  <Stat value="0" label="Lost">Every order was kept.</Stat>
+</SlideStats>
+
+<SlideBars>
+  <Bar value={12} highlight>Checkout</Bar>
+  <Bar value={4} detail="p95">Search</Bar>
+</SlideBars>
+```
+
+A diagram's parts are children of their kind. Two kinds share one children list, and each element goes to its own field: a pipeline's `PipelineStep` and `PipelineSpan`, a sequence's `SequenceActor` and `SequenceMessage`, and a lanes diagram's `Lane` and `LanesNote`. Ids, edges, indexes, and short lists of chips or steps stay attributes:
+
+```tsx
+<SlideFanout source="Order">
+  <FanoutTarget name="Ledger">Holds the money.</FanoutTarget>
+  <FanoutTarget name="Email" tone="accent">Tells the customer.</FanoutTarget>
+</SlideFanout>
+
+<SlideGraph edges={[['cart', 'ledger']]}>
+  <GraphNode id="cart" term="Cart">What the customer picked.</GraphNode>
+  <GraphNode id="ledger" term="Ledger">Where the money is held.</GraphNode>
+</SlideGraph>
+
+<SlideLanes join="Checkout">
+  <Lane label="Card" steps={['Authorize', 'Capture']} />
+  <Lane label="Wallet" tone="accent" steps={['Redirect']} />
+  <LanesNote title="Card">Two steps, no redirect.</LanesNote>
+</SlideLanes>
+
+<SlideLayers>
+  <Layer name="Storefront" owner="Web">What people see.</Layer>
+  <Layer name="Orders API" owner="Platform">Takes and checks orders.</Layer>
+  <Layer name="Ledger" owner="Payments" chips={['holds', 'refunds']} />
+</SlideLayers>
+
+<SlidePipeline>
+  <PipelineStep title="Hold" />
+  <PipelineStep title="Settle" />
+  <PipelineSpan from={0} to={1} tone="primary" label="Ours" title="Ledger">We own both steps.</PipelineSpan>
+</SlidePipeline>
+
+<SlideSequence>
+  <SequenceActor id="app">App</SequenceActor>
+  <SequenceActor id="api">Orders API</SequenceActor>
+  <SequenceActor id="bank">Bank</SequenceActor>
+  <SequenceMessage from="app" to="api">Pay</SequenceMessage>
+  <SequenceMessage from="api" to="bank">Charge</SequenceMessage>
+</SlideSequence>
+
+<SlideTerritoryGroup>
+  <Territory title="Host" tone="accent">Owns routing.</Territory>
+</SlideTerritoryGroup>
+
+<SlideTimeline>
+  <TimelineItem label="09:00" channel="Pager" heading="Checkout paged">On call answered.</TimelineItem>
+  <TimelineItem label="09:12" channel="Slack" heading="Cause found">A bad deploy.</TimelineItem>
+  <TimelineItem label="09:41" channel="Deploy" heading="Rolled back">Orders flowed again.</TimelineItem>
+</SlideTimeline>
+
+<SlideTree root="checkout/">
+  <TreeEntry name="refund.ts">Issues refunds.</TreeEntry>
+</SlideTree>
+```
+
+An annotated render takes its `SlideRender` and its `RenderPin` children side by side; a pin's sentence is its text. A render grid takes `RenderTile` children, each captioned by its text. The slide a render embeds stays its `body` prop, because it is drawn, not walked:
+
+```tsx
+<SlideAnnotatedRender>
+  <SlideRender slide="checkout" surface="snapshot" />
+  <RenderPin x={20} y={30} title="Heading">The claim, in one line.</RenderPin>
+</SlideAnnotatedRender>
+
+<SlideRenderGrid body={[{ type: 'slideHeading', title: 'Refunds settle in two days' }]}>
+  <RenderTile surface="react">Hosts</RenderTile>
+  <RenderTile surface="slack">Channels</RenderTile>
+</SlideRenderGrid>
 ```
 
 `toComposition` walks the tree back into the plain `Composition` value every surface renders from — JSX is authoring sugar, not a second representation.

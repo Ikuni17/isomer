@@ -76,9 +76,9 @@ describe('the slides pack authoring declarations', () => {
             <SlideFooter brand="Isomer" />
             <SlideHeading title="Who owns what" />
             <SlideTerritoryGroup>
-              <SlideTerritory title="Us" tone="primary">
+              <Territory title="Us" tone="primary">
                 We own the contract.
-              </SlideTerritory>
+              </Territory>
             </SlideTerritoryGroup>
           </SlideFrame>
         </Composition>
@@ -99,7 +99,7 @@ describe('the slides pack authoring declarations', () => {
       diagnostics({
         '/virtual/isomer.d.ts': declarations,
         '/virtual/use.tsx':
-          '<SlideTranscript><SlideTurn role={42}>hello</SlideTurn></SlideTranscript>;',
+          '<SlideTranscript><TranscriptTurn role={42}>hello</TranscriptTurn></SlideTranscript>;',
       })
     ).toHaveLength(1);
   });
