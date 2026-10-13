@@ -26,10 +26,14 @@ export const authoredProps = Symbol.for('elastic.isomer.authored_props');
 /** Set when a field is filled from text children. */
 export const authoredText = Symbol.for('elastic.isomer.authored_text');
 
+/** Set when a field is filled from primitive elements no other field claims. */
+export const authoredNodes = Symbol.for('elastic.isomer.authored_nodes');
+
 /** Holds a {@link fromChildren} brand's `toItem`. */
 export const authoredToItem = Symbol.for('elastic.isomer.authored_to_item');
 const authoredTextField = Symbol.for('elastic.isomer.authored_text_field');
 const authoredCollapse = Symbol.for('elastic.isomer.authored_collapse');
+const authoredDedent = Symbol.for('elastic.isomer.authored_dedent');
 const authoredPropsSchema = Symbol.for('elastic.isomer.authored_props_schema');
 
 /**
@@ -54,6 +58,11 @@ export interface AuthoredToItemBrand {
 /** A field filled from text children. */
 export interface AuthoredTextBrand {
   readonly [authoredText]: true;
+}
+
+/** A field filled from primitive elements, like a child slot the tree walk does not visit. */
+export interface AuthoredNodesBrand {
+  readonly [authoredNodes]: true;
 }
 
 /** What {@link fromChildren}'s `toItem` receives. */
@@ -127,14 +136,16 @@ const BRANDS = [
   authoredTextField,
   authoredToItem,
   authoredText,
+  authoredNodes,
   authoredCollapse,
+  authoredDedent,
   authoredPropsSchema,
 ] as const;
 
 // Applies a complete branding. Branding an instance again is allowed only with
 // the same configuration, absent options included, since both fields share it.
 const brand = (
-  caller: 'fromChildren' | 'fromTextChildren',
+  caller: 'fromChildren' | 'fromNodeChildren' | 'fromTextChildren',
   schema: object,
   config: Partial<Record<(typeof BRANDS)[number], unknown>>
 ): void => {
@@ -246,18 +257,34 @@ export function fromChildren(
 /**
  * Brands `schema` as text children.
  *
- * Whitespace collapses unless `collapseWhitespace` is `false`.
+ * Whitespace collapses unless `collapseWhitespace` is `false`. `dedent` keeps
+ * it and reads the text as source, as {@link textFromChildren} does.
  */
 export const fromTextChildren = <TSchema extends ZodType>(
   schema: TSchema,
-  options?: { collapseWhitespace?: boolean }
+  options?: { collapseWhitespace?: boolean; dedent?: boolean }
 ): TSchema & AuthoredTextBrand => {
   brand('fromTextChildren', schema, {
     [authoredText]: true,
     [authoredCollapse]:
-      options?.collapseWhitespace === false ? false : undefined,
+      options?.collapseWhitespace === false || options?.dedent
+        ? false
+        : undefined,
+    [authoredDedent]: options?.dedent ? true : undefined,
   });
   return schema as TSchema & AuthoredTextBrand;
+};
+
+/**
+ * Brands `schema`, a node or an array of nodes, as the primitive elements among
+ * the children that no other field claims. Use it for nodes the tree walk does
+ * not visit; a walked child slot fills from children already.
+ */
+export const fromNodeChildren = <TSchema extends ZodType>(
+  schema: TSchema
+): TSchema & AuthoredNodesBrand => {
+  brand('fromNodeChildren', schema, { [authoredNodes]: true });
+  return schema as TSchema & AuthoredNodesBrand;
 };
 
 /** One {@link fromChildren} field as the shim reads it. */
@@ -283,16 +310,27 @@ export interface AuthoredChildField {
 /** One {@link fromTextChildren} field as the shim reads it. */
 export interface AuthoredTextField {
   field: string;
-  /** `true` unless the brand was given `collapseWhitespace: false`. */
+  /** `true` unless the brand was given `collapseWhitespace: false` or `dedent`. */
   collapseWhitespace: boolean;
+  /** Set when the brand was given `dedent`. */
+  dedent?: true;
   /** Whether the field accepts `undefined`, so text children may be omitted. */
   optional: boolean;
+}
+
+/** One {@link fromNodeChildren} field as the shim reads it. */
+export interface AuthoredNodesField {
+  field: string;
+  /** Whether the field holds an array of nodes rather than one. */
+  array: boolean;
 }
 
 /** The branded fields found on one object schema. */
 export interface AuthoredSpec {
   children: AuthoredChildField[];
   text: AuthoredTextField[];
+  /** Absent on a spec built by hand; read as none. */
+  nodes?: AuthoredNodesField[];
 }
 
 const zodDefType = (schema: object): string | undefined =>
@@ -468,12 +506,16 @@ const readText = (
   if (!holder) {
     return undefined;
   }
-  return {
+  const text: AuthoredTextField = {
     field,
     collapseWhitespace:
       (holder as { [authoredCollapse]?: unknown })[authoredCollapse] !== false,
     optional: optionalThrough(schema),
   };
+  if ((holder as { [authoredDedent]?: unknown })[authoredDedent] === true) {
+    text.dedent = true;
+  }
+  return text;
 };
 
 /**
@@ -482,10 +524,11 @@ const readText = (
  */
 export const readAuthoredSpec = (schema: ZodType): AuthoredSpec => {
   if (zodDefType(schema) !== 'object' || !('shape' in schema)) {
-    return { children: [], text: [] };
+    return { children: [], text: [], nodes: [] };
   }
   const children: AuthoredChildField[] = [];
   const text: AuthoredTextField[] = [];
+  const nodes: AuthoredNodesField[] = [];
   for (const [field, fieldSchema] of Object.entries(
     schema.shape as Record<string, ZodType>
   )) {
@@ -497,7 +540,12 @@ export const readAuthoredSpec = (schema: ZodType): AuthoredSpec => {
     const textField = readText(field, fieldSchema);
     if (textField) {
       text.push(textField);
+      continue;
+    }
+    const holder = brandHolder(fieldSchema, authoredNodes);
+    if (holder) {
+      nodes.push({ field, array: arrayElement(holder) !== undefined });
     }
   }
-  return { children, text };
+  return { children, text, nodes };
 };

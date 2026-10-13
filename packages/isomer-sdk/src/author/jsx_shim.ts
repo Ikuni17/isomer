@@ -21,6 +21,7 @@ import type { PrimitiveNode } from '../define/primitive_module';
 import {
   type AuthoredChildBrand,
   type AuthoredChildField,
+  type AuthoredNodesBrand,
   type AuthoredSpec,
   type AuthoredTextBrand,
   type AuthoredToItemBrand,
@@ -76,7 +77,7 @@ type LooseSchema<TSchema> = string extends keyof ShapeOf<TSchema>
 // The schema a brand is read from: `F`, or one an optional, nullable, default,
 // or readonly wrapper holds.
 type Branded<F> = F extends
-  AuthoredChildBrand<string, unknown> | AuthoredTextBrand
+  AuthoredChildBrand<string, unknown> | AuthoredTextBrand | AuthoredNodesBrand
   ? F
   : F extends {
         _zod: {
@@ -91,7 +92,7 @@ type Branded<F> = F extends
 
 type AuthoredNames<TSchema> = {
   [K in keyof ShapeOf<TSchema>]: Branded<ShapeOf<TSchema>[K]> extends
-    AuthoredChildBrand<string, unknown> | AuthoredTextBrand
+    AuthoredChildBrand<string, unknown> | AuthoredTextBrand | AuthoredNodesBrand
     ? K
     : never;
 }[keyof ShapeOf<TSchema>];
@@ -244,7 +245,8 @@ export type JsxShim<
  * from JSX children, and each child type becomes a component. Several branded
  * fields share one children list, and each takes the elements of its type.
  * Elements of a registered primitive that match none of them fill the one
- * unbranded child slot from {@link PrimitiveDefinition.children}. A primitive with no brand still fills that slot, array or
+ * unbranded child slot from {@link PrimitiveDefinition.children}, or the one
+ * {@link fromNodeChildren} field. A primitive with no brand still fills that slot, array or
  * single node, from its children. That field is optional on the component's
  * props.
  */
@@ -376,7 +378,7 @@ const bodyNodeFromElement = <TNode extends PrimitiveNode>(
       rawChildren !== undefined
     ) {
       const nested = flattenChildren(rawChildren).map(parseChild);
-      converted[unique.field] = unique.array ? nested : nested[0];
+      converted[unique.field] = slotValue(nested, unique);
     } else if (slots.length === 0 && flattenChildren(rawChildren).length > 0) {
       throw new IsomerError(
         'UNEXPECTED_CHILDREN',
@@ -459,7 +461,7 @@ const fillAuthoredFields = (
   const leftover = elements.filter((child) => !claimed.has(child));
   if (slotOpen && slot && leftover.length > 0) {
     const nested = leftover.map(parseChild);
-    converted[slot.field] = slot.array ? nested : nested[0];
+    converted[slot.field] = slotValue(nested, slot);
   } else if (leftover.length > 0) {
     const childType = getAuthorType(leftover[0]!);
     const [empty, ...moreEmpty] = unsetChildren.filter(
@@ -497,6 +499,7 @@ const fillAuthoredFields = (
   for (const field of unsetText) {
     converted[field.field] = textFromChildren(textNodes, {
       collapseWhitespace: field.collapseWhitespace,
+      ...(field.dedent ? { dedent: true } : {}),
     });
   }
 };
@@ -596,16 +599,33 @@ const fillNestedBrands = (
   }
 };
 
+/** The slot's nodes, or its one node; throws on a second node for a single-node slot. */
+const slotValue = <TNode extends PrimitiveNode>(
+  nodes: readonly TNode[],
+  { array, field }: ChildSlot
+): readonly TNode[] | TNode | undefined => {
+  if (array) {
+    return nodes;
+  }
+  if (nodes.length > 1) {
+    throw new IsomerError(
+      'UNEXPECTED_CHILDREN',
+      `"${field}" takes one node, not ${nodes.length}.`
+    );
+  }
+  return nodes[0];
+};
+
 const convertPropValue = <TNode extends PrimitiveNode>(
   value: unknown,
   field: string,
   slots: readonly ChildSlot[],
   parseChild: (child: ReactNode) => TNode
 ): unknown => {
-  const asArray = slots.some((slot) => slot.field === field && slot.array);
+  const array = slots.some((slot) => slot.field === field && slot.array);
   const fromJsx = nodesFromJsx(value, parseChild);
   if (fromJsx) {
-    return asArray ? fromJsx : fromJsx[0];
+    return slotValue(fromJsx, { array, field });
   }
   if (Array.isArray(value)) {
     return value.flatMap((item: unknown) => {
@@ -647,12 +667,31 @@ export const flattenChildren = (children: ReactNode): ReactNode[] =>
     return child;
   });
 
+const lineBreak = /\r\n|[\n\r\u2028\u2029]/;
+
+// A template literal's source: the break after the opening backtick, the
+// indentation before the closing one, and the indentation every line shares go.
+const dedentSource = (text: string): string => {
+  const all = text.split(lineBreak);
+  const start = all.length > 1 && all[0] === '' ? 1 : 0;
+  const end =
+    all.length - start > 1 && /^ *$/.test(all[all.length - 1]!)
+      ? all.length - 1
+      : all.length;
+  const lines = all.slice(start, end);
+  const indents = lines
+    .filter((line) => line.trim() !== '')
+    .map((line) => line.length - line.trimStart().length);
+  const shared = indents.length > 0 ? Math.min(...indents) : 0;
+  return lines.map((line) => line.slice(shared)).join('\n');
+};
+
 /**
- * Children joined into one string. Throws on an element child, so a prop typed as text stays text. Collapses whitespace unless `{ collapseWhitespace: false }`.
+ * Children joined into one string. Throws on an element child, so a prop typed as text stays text. Collapses whitespace unless `{ collapseWhitespace: false }`; `{ dedent: true }` reads it as source, lines joined by `\n`.
  */
 export const textFromChildren = (
   children: ReactNode,
-  options?: { collapseWhitespace?: boolean }
+  options?: { collapseWhitespace?: boolean; dedent?: boolean }
 ): string => {
   const text = flattenChildren(children)
     .map((child) => {
@@ -665,6 +704,9 @@ export const textFromChildren = (
       );
     })
     .join('');
+  if (options?.dedent) {
+    return dedentSource(text);
+  }
   if (options?.collapseWhitespace === false) {
     return text.trim();
   }

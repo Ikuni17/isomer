@@ -13,6 +13,7 @@ import type { PrimitiveNode } from '../define/primitive_module';
 
 import {
   fromChildren,
+  fromNodeChildren,
   fromTextChildren,
   readAuthoredSpec,
 } from './authored_fields';
@@ -981,6 +982,128 @@ describe('nested brands', () => {
   });
 });
 
+describe('fromNodeChildren', () => {
+  const nodeSchema = z.object({ type: z.string() }).loose();
+  const embed = {
+    type: 'embed' as const,
+    schema: z.object({
+      type: z.literal('embed'),
+      caption: z.string().optional(),
+      body: fromNodeChildren(z.array(nodeSchema)).optional(),
+    }),
+  };
+  const gallery = {
+    type: 'gallery' as const,
+    schema: z.object({
+      type: z.literal('gallery'),
+      tiles: fromChildren('tile', z.array(z.object({ label: z.string() })), {
+        text: 'label',
+      }),
+      body: fromNodeChildren(z.array(nodeSchema)),
+    }),
+  };
+  const shim = buildJsxShim([...primitives, embed, gallery] as const);
+
+  it('fills the field from primitive elements, nested in turn', () => {
+    const { Composition, Embed, Note, Stack } = shim;
+    expect(
+      shim.toComposition(
+        createElement(
+          Composition,
+          null,
+          createElement(
+            Embed,
+            { caption: 'Shown' },
+            createElement(Stack, null, createElement(Note))
+          )
+        )
+      ).body
+    ).toEqual([
+      {
+        type: 'embed',
+        caption: 'Shown',
+        body: [{ type: 'stack', items: [{ type: 'note' }] }],
+      },
+    ]);
+  });
+
+  it('takes the elements a branded child field leaves', () => {
+    const { Composition, Gallery, Note, Tile } = shim;
+    expect(
+      shim.toComposition(
+        createElement(
+          Composition,
+          null,
+          createElement(
+            Gallery,
+            null,
+            createElement(Note),
+            createElement(Tile, null, 'One')
+          )
+        )
+      ).body
+    ).toEqual([
+      { type: 'gallery', tiles: [{ label: 'One' }], body: [{ type: 'note' }] },
+    ]);
+  });
+
+  it('rejects a second element for a single-node field', () => {
+    const pinned = buildJsxShim([
+      { type: 'note' as const },
+      {
+        type: 'pin' as const,
+        schema: z.object({
+          type: z.literal('pin'),
+          caption: z.string().optional(),
+          node: fromNodeChildren(nodeSchema),
+        }),
+      },
+      {
+        type: 'card' as const,
+        children: (node: { header: PrimitiveNode }) => [
+          { node: node.header, path: 'header' },
+        ],
+      },
+    ] as const);
+    const { Card, Composition: View, Note: Leaf, Pin } = pinned;
+    const twoNotes = [createElement(Leaf), createElement(Leaf)];
+
+    expect(
+      pinned.toComposition(
+        createElement(View, null, createElement(Pin, null, createElement(Leaf)))
+      ).body
+    ).toEqual([{ type: 'pin', node: { type: 'note' } }]);
+    for (const [element, field] of [
+      [createElement(Pin, null, ...twoNotes), 'node'],
+      [createElement(Card, null, ...twoNotes), 'header'],
+      [
+        createElement(Card, {
+          header: createElement(Fragment, null, ...twoNotes),
+        }),
+        'header',
+      ],
+    ] as const) {
+      expect(() =>
+        pinned.toComposition(createElement(View, null, element))
+      ).toThrow(
+        expect.objectContaining({
+          code: 'UNEXPECTED_CHILDREN',
+          message: `"${field}" takes one node, not 2.`,
+        })
+      );
+    }
+  });
+
+  it('reads as a node field on the spec and leaves the prop optional', () => {
+    expect(readAuthoredSpec(embed.schema).nodes).toEqual([
+      { field: 'body', array: true },
+    ]);
+    expectTypeOf<Parameters<typeof shim.Gallery>[0]>()
+      .toHaveProperty('body')
+      .toEqualTypeOf<{ type: string; [key: string]: unknown }[] | undefined>();
+  });
+});
+
 describe('readAuthoredSpec', () => {
   it('reads a child field as one item or an array, and its own brands from itemSchema', () => {
     const delta = fromChildren('delta', z.object({ label: z.string() }));
@@ -1017,6 +1140,39 @@ describe('textFromChildren', () => {
         collapseWhitespace: false,
       })
     ).toBe('const x = {\n  a: 1,\n};');
+  });
+
+  it('reads source with `dedent`, keeping inner indentation and blank lines', () => {
+    expect(
+      textFromChildren('\n      a {\n        b;\n\n      }\n    ', {
+        dedent: true,
+      })
+    ).toBe('a {\n  b;\n\n}');
+  });
+
+  it('fills a dedent-branded field from a template literal', () => {
+    const {
+      Composition: View,
+      Snippet,
+      toComposition: parse,
+    } = buildJsxShim([
+      {
+        type: 'snippet' as const,
+        schema: z.object({
+          type: z.literal('snippet'),
+          source: fromTextChildren(z.string(), { dedent: true }),
+        }),
+      },
+    ] as const);
+    expect(
+      parse(
+        createElement(
+          View,
+          null,
+          createElement(Snippet, null, '\n  x\n    y\n')
+        )
+      ).body
+    ).toEqual([{ type: 'snippet', source: 'x\n  y' }]);
   });
 
   it('rejects an element child', () => {
