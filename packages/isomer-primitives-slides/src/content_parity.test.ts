@@ -45,6 +45,7 @@ const notWords = new Set([
   'spacing',
   'marker',
   'chrome',
+  'slide',
   'surface',
   'edges',
   'placement',
@@ -52,6 +53,9 @@ const notWords = new Set([
   'role',
   'format',
   'highlightPrefix',
+  'highlight',
+  'add',
+  'remove',
 ]);
 
 /** Embedded bodies print as another surface's output, so only the render's own words are checked. */
